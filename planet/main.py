@@ -3,7 +3,7 @@ import models
 import data
 import torch
 import utils
-import torch.functional as F
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from collections import OrderedDict
 
@@ -11,11 +11,6 @@ from collections import OrderedDict
 
 from dm_control import suite
 from dm_control.suite.wrappers import pixels
-
-import pydevd_pycharm
-import debugger_helper
-
-debugger_helper.attach_pycharm(lambda host, port: pydevd_pycharm.settrace(host, port=port, stdoutToServer=True, stderrToServer=True))
 
 class Planet(pl.LightningModule):
 
@@ -51,8 +46,12 @@ class Planet(pl.LightningModule):
 
     def training_step(self, batch, n_batch):
 
-        batch_size = batch[0].shape[0]
+        batch_size = batch[0][0].shape[0]
         observation, actions, rewards, nonterminals = batch
+        observation = observation.squeeze(dim=0)
+        actions = actions.squeeze(dim=0)
+        rewards = rewards.squeeze(dim=0)
+        nonterminals = nonterminals.squeeze(dim=0)
         init_belief, init_state = torch.zeros(batch_size, self.config['belief size'], device=self.device), torch.zeros(batch_size, self.config['state size'], device=self.device)
 
         beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = \
@@ -73,28 +72,28 @@ class Planet(pl.LightningModule):
 
         else: self.current_step += 1
 
-        log = {
-            'reward' : predicted_rewards,
-            'step' : self.global_step.to(self.device),
-            'loss ' : loss
-        }
-        return OrderedDict({'loss' : loss, 'log': log, 'progress_bar' : log})
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
 
 
 
     @torch.no_grad()
     def data_collection(self):
 
-        observation = self.broker.reset()
+        observation, to_store = self.broker.reset()
         rewards = 0
         belief = torch.zeros(1, self.config['belief size'], device=self.device)
         posterior = torch.zeros(1, self.config['state size'], self.device)
         action = torch.zeros(1, self.config['action space'])
 
         for step in range(self.max_episode_length // self.action_repeat):
-            belief, posterior, action, next_obs, reward, done = self.broker.play_step(belief, posterior, action, observation)
+            belief, posterior, action, observation, reward, done, to_store = self.broker.play_step(belief,
+                                                                                      posterior,
+                                                                                      action,
+                                                                                      observation,
+                                                                                      store=to_store,
+                                                                                      give_uint=True)
             rewards += reward
-            observation = next_obs
 
             if done:
                 break

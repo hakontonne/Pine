@@ -62,7 +62,7 @@ class TransitionModel(nn.Module):
         self.belief_size    = cfg['belief size']
         self.state_size     = cfg['state size']
         self.embedding_size     = cfg['embedding size']
-        self.action_size    = cfg['action size']
+        self.action_size    = cfg['action space']
         self.hidden_size    = cfg['hidden size']
 
 
@@ -81,7 +81,7 @@ class TransitionModel(nn.Module):
     def forward(self, prev_state, actions, prev_belief, observations=None, nontermals=None):
         n_actions = actions.shape[0] + 1
 
-        beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = [[torch.empty(0)*10] for i in range(5)]
+        beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = [[torch.empty(0)]*n_actions for i in range(7)]
 
         beliefs[0], prior_states[0], posterior_states[0] = prev_belief, prev_state, prev_state
 
@@ -101,7 +101,7 @@ class TransitionModel(nn.Module):
             prior_states[t+1] = prior_means[t+1] + prior_std_devs[t+1]*torch.randn_like(prior_means[t+1])
 
             #Unsure if i want to keep this, i will inverstigate further once the code is complete.
-            if observations:
+            if observations is not None:
 
                 prev_t = t-1
                 hidden = self.act_func(self.embed_belief_post(torch.cat([beliefs[t+1], observations[t]], dim=1)))
@@ -109,10 +109,10 @@ class TransitionModel(nn.Module):
                 posterior_std_devs[t+1] = F.softplus(posterior_std_dev) + self.m_std_dev
                 posterior_states[t+1]  = posterior_means[t+1] + posterior_std_devs[t+1]*torch.randn_like(posterior_means[t+1])
 
-            hidden = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
-            if observations:
-                hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0),
-                           torch.stack(posterior_std_devs[1:], dim=0)]
+        hidden = [torch.stack(beliefs[1:], dim=0), torch.stack(prior_states[1:], dim=0), torch.stack(prior_means[1:], dim=0), torch.stack(prior_std_devs[1:], dim=0)]
+        if observations is not None:
+            hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0),
+                       torch.stack(posterior_std_devs[1:], dim=0)]
 
         return hidden
 
@@ -149,10 +149,10 @@ class ObservationModel(nn.Module):
 
     def forward(self, belief, state):
         hidden = self.fc1(torch.cat([belief, state], dim=1))
-        hidden = hidden.view(-1, self.embedding_size, 1, 1)
-        hidden = self.act_fn(self.conv1(hidden))
-        hidden = self.act_fn(self.conv2(hidden))
-        hidden = self.act_fn(self.conv3(hidden))
+        hidden = hidden.view(-1, self.embed_size, 1, 1)
+        hidden = self.act_func(self.conv1(hidden))
+        hidden = self.act_func(self.conv2(hidden))
+        hidden = self.act_func(self.conv3(hidden))
         observation = self.conv4(hidden)
 
         return observation
@@ -187,8 +187,8 @@ class RewardModel(nn.Module):
         self.act_func = F.relu
 
     def forward(self, belief, state):
-        hidden = self.act_fn(self.fc1(torch.cat([belief, state], dim=1)))
-        hidden = self.act_fn(self.fc2(hidden))
+        hidden = self.act_func(self.fc1(torch.cat([belief, state], dim=1)))
+        hidden = self.act_func(self.fc2(hidden))
         reward = self.fc3(hidden).squeeze(dim=1)
         return reward
 
@@ -217,8 +217,7 @@ class Encoder(nn.Module):
 
 
     def forward(self, observation):
-        print(observation.dtype)
-        print(observation.shape)
+
         hdn1 = self.conv1(observation)
         hidden = self.act_fn(hdn1)
         hidden = self.act_fn(self.conv2(hidden))

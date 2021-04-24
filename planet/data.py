@@ -6,6 +6,8 @@ import torch
 from torch.utils.data import IterableDataset
 from dm_control import suite
 from dm_control.suite.wrappers import pixels
+import itertools
+
 
 import utils
 class DeepmindDatamodule(pl.LightningDataModule):
@@ -36,30 +38,42 @@ class EpisodeBuffer:
 
     def append(self, e: Episode) -> None:
 
-        e.observation = utils.postprocess_observation(e.observation, self.bitdepth)
-        #.done = not e.done
+
+        e.done = not e.done
+
+
         self.buffer.append(e)
 
 
     def sample(self, batch_size: int):
 
-        idx = np.random.choice(len(self.buffer), batch_size, replace=False)
-        observation, action, reward, nontermials = zip(*[self.buffer[i] for i in idx])
+        observations, actions, rewards, nonterminals = [], [], [], []
+        idxs = np.random.choice(len(self.buffer)-batch_size, batch_size, replace=False)
+        #indicies = [np.arange(i, len(self.buffer)-batch_size) for i in idxs]
+        for idx in idxs:
+            observation, action, reward, nonterminal = zip(*list(itertools.islice(self.buffer, idx, idx+batch_size)))
+            observation = utils.image_to_tensor(list(observation))
+            observations.append(observation)
+            actions.append(torch.stack(action))
+            rewards.append(torch.Tensor(reward))
+            nonterminals.append(torch.Tensor(nonterminal).unsqueeze(dim=1))
 
-        return observation, action, reward, nontermials
+
+
+        return torch.stack(observations), torch.stack(actions), torch.stack(rewards), torch.stack(nonterminals)
 
 
 class Dataset(IterableDataset):
 
-    def __init__(self, buffer: EpisodeBuffer, sample_size: int = 200):
+    def __init__(self, buffer: EpisodeBuffer, sample_size: int = 50):
         self.buffer = buffer
         self.sample_size = sample_size
 
     def __iter__(self):
-        observation, action, reward, nontermials = self.buffer.sample(self.sample_size)
-        for i in range(len(nontermials)):
-            yield observation[i], action[i], reward[i], nontermials[i]
-
+        #observation, action, reward, nontermials = self.buffer.sample(self.sample_size)
+        #for i in range(len(nontermials)):
+        #    yield observation[i], action[i], reward[i], nontermials[i]
+        yield self.buffer.sample(self.sample_size)
 
 class Broker:
     def __init__(self, gym_name, replay_buffer, planner, transition_model, encoder, config):
@@ -98,21 +112,21 @@ class Broker:
 
         env = suite.load(domain_name=domain, task_name=task)
         env = pixels.Wrapper(env)
-        self.action_space = env.action_spec()
+        self.action_space = env.action_spec().shape[0]
 
         return env
 
-    def reset(self):
+    def reset(self, storage=False):
         self.t = 0
         self.state = self.env.reset()
-        return utils._images_to_observation(self.env.physics.render(camera_id=0), self._bit_depth)
-
+        img = self.env.physics.render(camera_id=0)
+        return utils.image_to_tensor(img), img
     def close(self):
         self.env.close()
 
 
     @torch.no_grad()
-    def play_step(self, belief, posterior_state, action, observation, explore=False):
+    def play_step(self, belief, posterior_state, action, observation, explore=False, store=None, give_uint=False):
         belief, _, _, _, posterior_state, _, _ = self.transition_model(posterior_state, action.unsqueeze(dim=0), belief,
                                                 self.encoder(observation).unsqueeze(dim=0))
         belief, posterior_state = belief.squeeze(dim=0), posterior_state.squeeze(dim=0)
@@ -123,10 +137,12 @@ class Broker:
 
         action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0])
 
-        exp = Episode(next_obs, action, reward, done)
-        self.buffer.append(exp)
 
-        return belief, posterior_state, action, next_obs, reward, done
+        if store: self.buffer.append(Episode(store, action, reward, done))
+
+        if give_uint:
+            return belief, posterior_state, action, utils.image_to_tensor(next_obs), reward, done, next_obs
+        return belief, posterior_state, action, utils.image_to_tensor(next_obs), reward, done
 
 
     @torch.no_grad()
@@ -143,20 +159,21 @@ class Broker:
                 self.reset()
                 break
 
-        observation = utils._images_to_observation(self.env.physics.render(camera_id=0), self._bit_depth)
 
-        return observation, r, done
+
+        return self.env.physics.render(camera_id=0), r, done
 
     def random_episode(self):
 
         done = False
-        obs = self.reset()
+        _, obs = self.reset()
         t = 0
 
         while not done:
             action = utils._random_action(self.env.action_spec())
             next_obs, reward, done = self.step(action)
-            exp = Episode(next_obs.detach().numpy(), action, reward, done)
+            exp = Episode(obs, action, reward, done)
+            obs = next_obs
             self.buffer.append(exp)
             t += 1
 

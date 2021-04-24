@@ -35,7 +35,7 @@ config = {
     'belief size' : 200,
     'state size'  : 30,
     'embedding size' : 1024,
-    'action size' : 1,
+
 
     'activation function': 'relu',
     'action repeat': 2,
