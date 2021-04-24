@@ -39,7 +39,7 @@ config = {
 
     'activation function': 'relu',
     'action repeat': 2,
-    'collect interval' : 1000,
+    'collect interval' : 5,
     'minimum standard devation' : 0.1,
     'hidden size' : 200,
     'candidates' : 1000,
@@ -57,9 +57,9 @@ config = {
 planet = main.Planet(config)
 
 trainer = pl.Trainer(
-    gpus=0,
-    max_epochs=1000,
-    val_check_interval=100
+    gpus=1,
+    max_epochs=10,
+    val_check_interval=5
 )
 
 trainer.fit(planet)

@@ -29,6 +29,7 @@ class Planet(pl.LightningModule):
         self.planner = models.Planner(config, self.tm, self.rm)
 
         self.init_dataset()
+        self.broker._init_networks(self.planner, self.tm, self.encoder)
 
         self.collect_interval = config['collect interval']
         self.action_repeat = config['action repeat']
@@ -65,8 +66,8 @@ class Planet(pl.LightningModule):
                                  reduction='none').mean(dim=(0, 1))
 
         loss = (observation_loss + reward_loss)
-
-        if self.current_step == self.collect_interval:
+        if True:
+        #if self.current_step == self.collect_interval:
             self.current_step = 0
             self.data_collection()
 
@@ -83,8 +84,8 @@ class Planet(pl.LightningModule):
         observation, to_store = self.broker.reset()
         rewards = 0
         belief = torch.zeros(1, self.config['belief size'], device=self.device)
-        posterior = torch.zeros(1, self.config['state size'], self.device)
-        action = torch.zeros(1, self.config['action space'])
+        posterior = torch.zeros(1, self.config['state size'], device=self.device)
+        action = torch.zeros(1, self.config['action space'], device=self.device)
 
         for step in range(self.max_episode_length // self.action_repeat):
             belief, posterior, action, observation, reward, done, to_store = self.broker.play_step(belief,
@@ -114,7 +115,7 @@ class Planet(pl.LightningModule):
     def train_dataloader(self) -> DataLoader:
         dataset = data.Dataset(self.buffer)
 
-        dataloader = DataLoader(dataset=dataset, batch_size=self.config['batch size'])
+        dataloader = DataLoader(dataset=dataset, batch_size=self.config['batch size'], num_workers=0, pin_memory=True)
         return dataloader
 
 
@@ -126,8 +127,6 @@ class Planet(pl.LightningModule):
         optimizer = torch.optim.Adam(paramlist, lr=0.001, eps=0.0001)
 
         return [optimizer]
-
-
 
 
 

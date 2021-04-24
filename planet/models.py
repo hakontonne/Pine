@@ -8,11 +8,18 @@ class Planner(nn.Module):
 
     def __init__(self, config, transition_model, reward_model):
         super(Planner, self).__init__()
+
+        self.transition_model   = transition_model
+        self.reward_model       = reward_model
+
         self.candidates         = config['candidates']
         self.optimize_iters     = config['optimisation iterations']
         self.planning_horizon   = config['planning horizon']
         self.top_candidates     = config['top candidates']
         self.action_size        = config['action space']
+        self.max_action         = config['max action']
+        self.min_action         = config['min action']
+
 
 
     def forward(self, belief, state):
@@ -24,7 +31,7 @@ class Planner(nn.Module):
                                                   device=belief.device), torch.ones(self.planning_horizon, B, 1,
                                                                                     self.action_size,
                                                                                     device=belief.device)
-        for _ in range(self.optimisation_iters):
+        for _ in range(self.optimize_iters):
 
             actions = (action_mean + action_std_dev * torch.randn(self.planning_horizon, B, self.candidates,
                                                                   self.action_size, device=action_mean.device)).view(

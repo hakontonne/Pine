@@ -83,11 +83,11 @@ class Broker:
         self._action_noise = config['action noise']
 
         self._init_networks(planner, transition_model, encoder)
-        self.env = self._init_env(gym_name)
+        self.env = self._init_env(gym_name, config)
         self.buffer = replay_buffer
         self.reset()
 
-        config['action space'] = self.action_space
+
 
     def __init__(self,  gym_name, replay_buffer, config):
         self._action_repeat = config['action repeat']
@@ -95,7 +95,7 @@ class Broker:
         self._bit_depth = config['bit depth']
         self._action_noise = config['action noise']
 
-        self.env = self._init_env(gym_name)
+        self.env = self._init_env(gym_name, config)
         self.buffer = replay_buffer
         self.reset()
 
@@ -107,12 +107,18 @@ class Broker:
         self.encoder = encoder
 
 
-    def _init_env(self, gym_name):
+    def _init_env(self, gym_name, config):
         domain, task = gym_name.split('-')
 
         env = suite.load(domain_name=domain, task_name=task)
         env = pixels.Wrapper(env)
         self.action_space = env.action_spec().shape[0]
+        self.max_action = float(env.action_spec().maximum[0])
+        self.min_action = float(env.action_spec().minimum[0])
+
+        config['action space'] = self.action_space
+        config['max action'] = self.max_action
+        config['min action'] = self.min_action
 
         return env
 
@@ -121,6 +127,7 @@ class Broker:
         self.state = self.env.reset()
         img = self.env.physics.render(camera_id=0)
         return utils.image_to_tensor(img), img
+
     def close(self):
         self.env.close()
 
@@ -135,10 +142,10 @@ class Broker:
             action = action + self._action_noise * torch.randn_like(action)
         next_obs, reward, done = self.step(action[0].cpu())
 
-        action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0])
+        action.clamp_(self.min_action, self.max_action)
 
 
-        if store: self.buffer.append(Episode(store, action, reward, done))
+        if store is not None: self.buffer.append(Episode(store, action, reward, done))
 
         if give_uint:
             return belief, posterior_state, action, utils.image_to_tensor(next_obs), reward, done, next_obs

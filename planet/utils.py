@@ -1,7 +1,7 @@
 
 import torch
 import numpy as np
-import cv2
+
 
 import torchvision.transforms as trans
 
@@ -21,7 +21,7 @@ def image_to_tensor(observation):
       observation[i] = image_to_tensor_transform(np.ascontiguousarray(observation[i]))
     observation = torch.stack(observation)
   else:
-    observation = image_to_tensor_transform(np.ascontiguousarray(observation))
+    observation = image_to_tensor_transform(np.ascontiguousarray(observation)).unsqueeze(dim=0)
 
   return observation
 
