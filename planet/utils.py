@@ -16,7 +16,6 @@ image_to_tensor_transform = trans.Compose([
 
 def image_to_tensor(observation):
   if isinstance(observation, (list, tuple)):
-
     for i in range(len(observation)):
       observation[i] = image_to_tensor_transform(np.ascontiguousarray(observation[i]))
     observation = torch.stack(observation)

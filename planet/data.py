@@ -10,7 +10,7 @@ import itertools
 
 
 import utils
-class DeepmindDatamodule(pl.LightningDataModule):
+class PineDataModule(pl.LightningDataModule):
 
     def __init__(self, config):
         self.observation_size   = config['observation size']
@@ -31,6 +31,7 @@ class EpisodeBuffer:
     def __init__(self, config):
         self.bitdepth = config['bit depth']
         self.buffer = collections.deque(maxlen=config['episode size'])
+        self.chunk_size = config['chunk size']
 
 
     def __len__(self):
@@ -48,32 +49,42 @@ class EpisodeBuffer:
     def sample(self, batch_size: int):
 
         observations, actions, rewards, nonterminals = [], [], [], []
-        idxs = np.random.choice(len(self.buffer)-batch_size, batch_size, replace=False)
+        idxs = np.random.choice(len(self.buffer)-self.chunk_size, batch_size, replace=False)
         #indicies = [np.arange(i, len(self.buffer)-batch_size) for i in idxs]
         for idx in idxs:
-            observation, action, reward, nonterminal = zip(*list(itertools.islice(self.buffer, idx, idx+batch_size)))
+            observation, action, reward, nonterminal = zip(*list(itertools.islice(self.buffer, idx, idx+self.chunk_size)))
             observation = utils.image_to_tensor(list(observation))
             observations.append(observation)
-            actions.append(torch.stack(action))
-            rewards.append(torch.Tensor(reward))
-            nonterminals.append(torch.Tensor(nonterminal).unsqueeze(dim=1))
+
+            a = torch.stack(action)
+            r = torch.Tensor(reward)
+            t = torch.Tensor(nonterminal).unsqueeze(dim=1)
+            actions.append(a)
+            rewards.append(r)
+            nonterminals.append(t)
 
 
 
-        return torch.stack(observations), torch.stack(actions), torch.stack(rewards), torch.stack(nonterminals)
+        return torch.stack(observations).reshape(self.chunk_size, batch_size, *observation.shape[1:]), torch.stack(actions).reshape(self.chunk_size, batch_size, *a.shape[1:]), torch.stack(rewards).reshape(self.chunk_size, batch_size, *r.shape[1:]), torch.stack(nonterminals).reshape(self.chunk_size, batch_size, 1)
+
+
 
 
 class Dataset(IterableDataset):
 
-    def __init__(self, buffer: EpisodeBuffer, sample_size: int = 50):
+    def __init__(self, buffer: EpisodeBuffer, batch_size: int = 50, ci: int = 100):
+        super(Dataset).__init__()
         self.buffer = buffer
-        self.sample_size = sample_size
+        self.batch_size = batch_size
+        self.ci = ci
 
     def __iter__(self):
         #observation, action, reward, nontermials = self.buffer.sample(self.sample_size)
         #for i in range(len(nontermials)):
         #    yield observation[i], action[i], reward[i], nontermials[i]
-        yield self.buffer.sample(self.sample_size)
+        yield self.buffer.sample(self.batch_size)
+
+
 
 class Broker:
     def __init__(self, gym_name, replay_buffer, planner, transition_model, encoder, config):
@@ -122,10 +133,11 @@ class Broker:
 
         return env
 
-    def reset(self, storage=False):
+    def reset(self, storage=False, device=None):
         self.t = 0
         self.state = self.env.reset()
         img = self.env.physics.render(camera_id=0)
+        if device is not None: return utils.image_to_tensor(img).to(device), img
         return utils.image_to_tensor(img), img
 
     def close(self):
@@ -134,6 +146,7 @@ class Broker:
 
     @torch.no_grad()
     def play_step(self, belief, posterior_state, action, observation, explore=False, store=None, give_uint=False):
+
         belief, _, _, _, posterior_state, _, _ = self.transition_model(posterior_state, action.unsqueeze(dim=0), belief,
                                                 self.encoder(observation).unsqueeze(dim=0))
         belief, posterior_state = belief.squeeze(dim=0), posterior_state.squeeze(dim=0)
@@ -145,7 +158,7 @@ class Broker:
         action.clamp_(self.min_action, self.max_action)
 
 
-        if store is not None: self.buffer.append(Episode(store, action, reward, done))
+        if store is not None: self.buffer.append(Episode(store, action.squeeze(dim=0).detach().cpu(), reward, done))
 
         if give_uint:
             return belief, posterior_state, action, utils.image_to_tensor(next_obs), reward, done, next_obs

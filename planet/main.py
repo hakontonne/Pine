@@ -6,6 +6,12 @@ import utils
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from collections import OrderedDict
+from torch.distributions import Normal
+from torch.distributions.kl import kl_divergence
+
+
+from pytorch_lightning.loggers import WandbLogger
+
 
 
 
@@ -18,8 +24,9 @@ class Planet(pl.LightningModule):
         super(Planet, self).__init__()
 
         self.config = config
+        self.batch_size = config['batch size']
         self.buffer = data.EpisodeBuffer(config)
-        self.broker = data.Broker('ball_in_cup-catch', self.buffer, config)
+        self.broker = data.Broker('cartpole-balance', self.buffer, config)
 
 
         self.tm = models.TransitionModel(config)
@@ -36,6 +43,7 @@ class Planet(pl.LightningModule):
         self.max_episode_length = config['max episode length']
 
         self.current_step = 0
+        self.free_nats = torch.full((1, ), 3, dtype=torch.float32, device=self.device)
 
     def init_dataset(self):
 
@@ -47,13 +55,14 @@ class Planet(pl.LightningModule):
 
     def training_step(self, batch, n_batch):
 
-        batch_size = batch[0][0].shape[0]
+
         observation, actions, rewards, nonterminals = batch
         observation = observation.squeeze(dim=0)
         actions = actions.squeeze(dim=0)
         rewards = rewards.squeeze(dim=0)
         nonterminals = nonterminals.squeeze(dim=0)
-        init_belief, init_state = torch.zeros(batch_size, self.config['belief size'], device=self.device), torch.zeros(batch_size, self.config['state size'], device=self.device)
+        init_belief, init_state = torch.zeros(self.batch_size, self.config['belief size'], device=self.device),\
+                                  torch.zeros(self.batch_size, self.config['state size'], device=self.device)
 
         beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = \
             self.tm(init_state, actions[:-1], init_belief, utils.bottle(self.encoder, (observation[1:],)), nonterminals[:-1])
@@ -64,18 +73,54 @@ class Planet(pl.LightningModule):
         predicted_rewards = utils.bottle(self.rm, (beliefs, posterior_states))
         reward_loss = F.mse_loss(predicted_rewards, rewards[:-1],
                                  reduction='none').mean(dim=(0, 1))
+        free_nats = torch.full((1,), 3, dtype=torch.float32, device=self.device)
+        kl_loss = torch.max(
+            kl_divergence(Normal(posterior_means, posterior_std_devs), Normal(prior_means, prior_std_devs)).sum(dim=2),
+            free_nats).mean(dim=(0, 1))  # Note that normalisation by overshooting distance and weighting by overshooting distance cancel out
 
-        loss = (observation_loss + reward_loss)
-        if True:
-        #if self.current_step == self.collect_interval:
+        self.log('observation loss', observation_loss, on_step=True, on_epoch=True, logger=True)
+        self.log('reward loss', reward_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('kl loss', kl_loss, on_step=True, on_epoch=True, logger=True)
+
+
+
+        loss = (observation_loss + reward_loss + kl_loss)
+
+        if self.current_step == self.collect_interval:
             self.current_step = 0
             self.data_collection()
+            self.validation_step(0, 0)
 
-        else: self.current_step += 1
+        self.current_step += 1
 
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
+
+
+    def validation_step(self, batch, batch_idx):
+
+        total_reward = 0
+        for _ in range(2):
+
+            observation, __ = self.broker.reset()
+            observation = observation.to(self.device)
+
+            belief = torch.zeros(1, self.config['belief size'], device=self.device)
+            posterior = torch.zeros(1, self.config['state size'], device=self.device )
+            action = torch.zeros(1, self.config['action space'], device=self.device)
+            for step in range(self.max_episode_length // self.action_repeat):
+
+                belief, posterior, action, observation, reward, done = self.broker.play_step(belief, posterior,
+                                                                                                       action,
+                                                                                                       observation)
+                observation = observation.to(self.device)
+                total_reward += reward
+
+                if done:
+                    break
+
+        self.log('val_reward', total_reward, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
 
     @torch.no_grad()
@@ -83,21 +128,27 @@ class Planet(pl.LightningModule):
 
         observation, to_store = self.broker.reset()
         rewards = 0
+        print('Call to data_collection now')
+        observation = observation.to(self.device)
         belief = torch.zeros(1, self.config['belief size'], device=self.device)
         posterior = torch.zeros(1, self.config['state size'], device=self.device)
         action = torch.zeros(1, self.config['action space'], device=self.device)
 
         for step in range(self.max_episode_length // self.action_repeat):
+
+
             belief, posterior, action, observation, reward, done, to_store = self.broker.play_step(belief,
                                                                                       posterior,
                                                                                       action,
-                                                                                      observation,
-                                                                                      store=to_store,
-                                                                                      give_uint=True)
+                                                                                      observation, explore=True,
+                                                                                      store=to_store, give_uint=True)
+            observation = observation.to(self.device)
             rewards += reward
 
             if done:
                 break
+
+        self.log('train reward', rewards, on_epoch=True, prog_bar=True)
 
 
 
@@ -111,13 +162,20 @@ class Planet(pl.LightningModule):
 
         action = self.planner(belief, post)
 
+        return action
+
 
     def train_dataloader(self) -> DataLoader:
-        dataset = data.Dataset(self.buffer)
+        dataset = data.Dataset(self.buffer, self.batch_size)
 
-        dataloader = DataLoader(dataset=dataset, batch_size=self.config['batch size'], num_workers=0, pin_memory=True)
+        dataloader = DataLoader(dataset=dataset, batch_size=self.config['batch size'], num_workers=8, pin_memory=True)
         return dataloader
 
+    def val_dataloader(self) -> DataLoader:
+        dataset = data.Dataset(self.buffer, self.batch_size)
+        dataloader = DataLoader(dataset=dataset, batch_size=self.batch_size)
+
+        return dataloader
 
     def configure_optimizers(
             self,
@@ -127,6 +185,39 @@ class Planet(pl.LightningModule):
         optimizer = torch.optim.Adam(paramlist, lr=0.001, eps=0.0001)
 
         return [optimizer]
+
+
+    def test_agent(self, broker):
+
+        images = []
+        observation, to_store = broker.reset()
+        rewards = 0
+        observation = observation.to(self.device)
+
+        belief = torch.zeros(1, self.config['belief size'], device=self.device)
+        posterior = torch.zeros(1, self.config['state size'], device=self.device)
+        action = torch.zeros(1, self.config['action space'], device=self.device)
+        c = 0
+        max_iters = 1000
+        done = False
+
+        while not done and (c < max_iters):
+            belief, posterior, action, observation, reward, done, to_store = broker.play_step(belief,
+                                                                                                   posterior,
+                                                                                                   action,
+                                                                                                   observation,
+                                                                                                   give_uint=True)
+            observation = observation.to(self.device)
+            rewards += reward
+
+            images.append(to_store)
+
+        return images, rewards
+
+
+
+
+
 
 
 
