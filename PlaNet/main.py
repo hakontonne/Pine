@@ -10,11 +10,11 @@ import argparse
 
 config = {
 
-'id': 'ignore',
+'id':  'fish_swim_high_repeat',
 'seed': 1,
 'disable cuda': False,
-'env name': 'cartpole-balance',
-'action repeat': 6,
+'env name':  'fish-swim',
+'action repeat': 8,
 'symbolic env': False,
 'max episode length': 1000,
 'experience size': 1000000,
@@ -27,7 +27,7 @@ config = {
 'episodes': 1000,
 'seed episodes': 5,
 'collect interval': 100,
-'batch size': 80,
+'batch size': 50,
 'chunk size': 50,
 'overshooting distance': 50,
 'overshooting kl beta': 0,

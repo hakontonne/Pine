@@ -4,8 +4,12 @@ import torch
 
 
 GYM_ENVS = ['Pendulum-v0', 'MountainCarContinuous-v0', 'Ant-v2', 'HalfCheetah-v2', 'Hopper-v2', 'Humanoid-v2', 'HumanoidStandup-v2', 'InvertedDoublePendulum-v2', 'InvertedPendulum-v2', 'Reacher-v2', 'Swimmer-v2', 'Walker2d-v2']
-CONTROL_SUITE_ENVS = ['cartpole-balance', 'cartpole-swingup', 'reacher-easy', 'finger-spin', 'cheetah-run', 'ball_in_cup-catch', 'walker-walk']
-CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2, 'cheetah': 4, 'ball_in_cup': 6, 'walker': 2}
+CONTROL_SUITE_ENVS = ['cartpole-balance', 'cartpole-balance_sparse' ,  'cartpole-swingup', 'cartpole-swingup_sparse',
+                      'reacher-easy', 'reacher-hard', 'finger-spin', 'finger-turn_easy', 'finger-turn_hard', 'cheetah-run',
+                      'ball_in_cup-catch', 'walker-walk', 'walker-stand', 'walker-run', 'hopper-hop', 'hopper-stand',
+                      'fish-swim', 'fish-upright', 'swimmer-swimmer6', 'swimmer-swimmer15', 'humanoid-run', 'manipulator-bring_ball',
+                      'acrobot-swingup']
+CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2, 'cheetah': 4, 'ball_in_cup': 6, 'walker': 2, 'fish' : 4, 'hopper' : 2}
 
 
 # Preprocesses an observation inplace (from float32 Tensor [0, 255] to [-0.5, 0.5])
@@ -36,8 +40,8 @@ class ControlSuiteEnv():
       self._env = pixels.Wrapper(self._env)
     self.max_episode_length = max_episode_length
     self.action_repeat = action_repeat
-    if action_repeat != CONTROL_SUITE_ACTION_REPEATS[domain]:
-      print('Using action repeat %d; recommended action repeat for domain is %d' % (action_repeat, CONTROL_SUITE_ACTION_REPEATS[domain]))
+    #if action_repeat != CONTROL_SUITE_ACTION_REPEATS[domain]:
+     # print('Using action repeat %d; recommended action repeat for domain is %d' % (action_repeat, CONTROL_SUITE_ACTION_REPEATS[domain]))
     self.bit_depth = bit_depth
 
   def reset(self):
