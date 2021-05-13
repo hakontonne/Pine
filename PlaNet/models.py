@@ -14,10 +14,80 @@ def bottle(f, x_tuple):
   y_size = y.size()
   return y.view(x_sizes[0][0], x_sizes[0][1], *y_size[1:])
 
+
+
+class Pine():
+
+  def __init__(self, config):
+    self.config = config
+    self.planet = PlaNet(config)
+    self.agents = []
+
+    self.env = None
+
+
+  def forward(self, observations, actions, nonterminals):
+    return self.planet.forward(observations, actions, nonterminals)
+
+  def new_env(self, env, task_description):
+    self.env = env
+
+    if len(self.agents) == 0:
+      self.planet.init_task_networks(self.config, env)
+      self.planet.set_optim(self.config)
+
+      return self.planet
+
+
+    observation = self.env.reset()
+    retval = self.compare_initial_observation(observation)
+    retval2 = self.compare_task_description(task_description)
+
+    return self.eval_likeness(retval, retval2)
+
+  def eval_likeness(self, obs_compare, descript_compare):
+    pass
+
+  def compare_initial_observation(self, observation):
+    pass
+
+  def compare_task_description(self, description):
+    pass
+
+
+
+  def get_action(self, belief, posterior_state, action, observation, explore=False, action_max=None, action_min=None):
+
+    return self.planet(belief, posterior_state, action, observation, explore, action_max, action_min)
+
+  def eval(self):
+    self.planet.eval()
+
+  def train(self):
+    self.planet.train()
+
+  def task_models_dict(self):
+    return self.planet.transition_model.state_dict(), self.planet.reward_model.state_dict()
+
+  def load_task_models_dict(self, dicts):
+    self.planet.init_task_networks(self.config, self.env, dicts)
+
+
+  def state_dict(self):
+    return self.planet.state_dict()
+
+  def load_dict(self, planet_dict):
+    self.planet.load_dict(planet_dict)
+
+
+
+
 class PlaNet():
 
-  def __init__(self, config, env):
+
+  def __init__(self, config, env=None):
     super(PlaNet, self).__init__()
+    self.assembled = False
     self.config = config
     self.device = config['device']
     self.belief_size = config['belief size']
@@ -33,26 +103,71 @@ class PlaNet():
     self.env = env
     self.batch_size = config['batch size']
 
+    self.free_nats = torch.full((1, ), config['free nats'], dtype=torch.float32, device=self.device)
+
+    if env is None and not config['symbolic env']:
+      self.init_visual_networks( (3, 64, 64))
+
+    else:
+      self.init_visual_networks(env.observation_size)
+      self.init_task_networks(config, env)
+      self.set_optim(config)
+      self.assembled = True
+
+
+  def init_visual_networks(self, observation_size):
+    self.encoder = Encoder(False, observation_size, self.embedding_size).to(
+      device=self.device)
+
+    self.observation_model = ObservationModel(False, observation_size, self.belief_size, self.state_size,
+                                              self.embedding_size).to(device=self.device)
+
+
+  def init_task_networks(self, config, env, statedicts=None):
+
 
     self.transition_model = TransitionModel(self.belief_size, self.state_size, env.action_size, self.hidden_size,
                                        self.embedding_size, ).to(device=self.device)
-    self.observation_model = ObservationModel(False, env.observation_size, self.belief_size, self.state_size,
-                                         self.embedding_size).to(device=self.device)
+
     self.reward_model = RewardModel(self.belief_size, self.state_size, self.hidden_size).to(
       device=self.device)
-    self.encoder = Encoder(False, env.observation_size, self.embedding_size).to(
-      device=self.device)
-    self.param_list = list(self.transition_model.parameters()) + list(self.observation_model.parameters()) + list(
-      self.reward_model.parameters()) + list(self.encoder.parameters())
-    self.optimiser = optim.Adam(self.param_list, lr=config['learning rate'],
-                           eps=self.adam_epsilon)
 
-    self.free_nats = torch.full((1, ), config['free nats'], dtype=torch.float32, device=self.device)
+    if statedicts is not None:
+      self.transition_model.load_state_dict(statedicts[0])
+      self.reward_model.load_state_dict(statedicts[1])
+
+
 
     self.planner = MPCPlanner(env.action_size, self.planning_horizon, self.optimisation_iters, self.candidates,
                          self.top_candidates, self.transition_model, self.reward_model, env.action_range[0], env.action_range[1])
 
+
+
+  def set_optim(self, config):
+
+    self.param_list = list(self.transition_model.parameters()) + list(self.observation_model.parameters()) + list(
+      self.reward_model.parameters()) + list(self.encoder.parameters())
+
+    self.optimiser = optim.Adam(self.param_list, lr=config['learning rate'],
+                                eps=self.adam_epsilon)
+
+
+  def new_task_network(self, config, env):
+    self.init_task_networks(config, env)
+    self.set_optim(config)
+    self.assembled = True
+
+  def set_task_network(self, config, env, transition_model_state_dict, reward_model_state_dict):
+
+    self.init_task_networks(config, env, [transition_model_state_dict, reward_model_state_dict])
+    self.set_optim(config)
+    self.assembled = True
+
+
+
   def forward(self, observations, actions, nonterminals):
+    if not self.assembled: raise RuntimeError('Task networks need to be initialized before doing forward pass')
+
     init_belief, init_state = torch.zeros(self.batch_size, self.belief_size, device=self.device),\
                               torch.zeros(self.batch_size, self.state_size, device=self.device)
 
@@ -110,13 +225,6 @@ class PlaNet():
     self.transition_model.load_state_dict(d[1])
     self.observation_model.load_state_dict(d[2])
     self.encoder.load_state_dict(d[3])
-
-
-
-
-
-
-
 
 class TransitionModel(nn.Module):
   __constants__ = ['min_std_dev']

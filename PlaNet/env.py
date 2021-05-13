@@ -29,6 +29,9 @@ def _images_to_observation(images, bit_depth):
   return images.unsqueeze(dim=0)  # Add batch dimension
 
 
+def list_of_envs():
+  return CONTROL_SUITE_ENVS
+
 class ControlSuiteEnv():
   def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth):
     from dm_control import suite

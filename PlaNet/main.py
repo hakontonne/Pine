@@ -50,7 +50,7 @@ config = {
 'checkpoint experience': False,
 
 'render': False,
-'device': 'cuda:5',
+'device': 'cpu',
 
 }
 
