@@ -4,6 +4,7 @@ import numpy as np
 import plotly
 from plotly.graph_objs import Scatter
 from plotly.graph_objs.scatter import Line
+from tqdm import tqdm
 
 
 # Plots min, max and mean + standard deviation bars of a population over time
@@ -37,3 +38,13 @@ def write_video(frames, title, path=''):
   for frame in frames:
     writer.write(frame)
   writer.release()
+
+def init_databuffer(buffer, env, iters):
+
+  for t in tqdm(range(iters), desc='Collecting some initial episodes'):
+    observation, done = env.reset(), False
+    while not done:
+      action = env.sample_random_action()
+      next_observation, reward, done = env.step(action)
+      buffer.append(observation, action, reward, done)
+      observation = next_observation

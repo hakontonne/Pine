@@ -1,7 +1,7 @@
 import torch.cuda
 
-from trainer import Trainer, get_env
-from models import PlaNet
+from trainer import Trainer, get_env, PineTrainer
+from models import PlaNet, Pine
 import wandb
 from memory import ExperienceReplay
 from tqdm import tqdm
@@ -9,12 +9,18 @@ import argparse
 from utils import init_databuffer
 
 
+parser = argparse.ArgumentParser(description='Optional description of cuda device')
+parser.add_argument('--gpu',type=int, choices=range(torch.cuda.device_count()))
+parser.add_argument('--id', type=str)
+
+arg = parser.parse_args()
+
 config = {
 
-'id':  'tests',
+'id':  'pine_test',
 'seed': 1,
 'disable cuda': False,
-'env name':  'walker-run',
+'env name':  None,
 'action repeat': 8,
 'symbolic env': False,
 'max episode length': 1000,
@@ -55,34 +61,24 @@ config = {
 
 }
 
-
-parser = argparse.ArgumentParser(description='Optional description of cuda device')
-parser.add_argument('--gpu',type=int, choices=range(torch.cuda.device_count()))
-parser.add_argument('--id', type=str)
-
-arg = parser.parse_args()
-
-
-
-
 if arg.gpu is not None:
     config['device'] = f'cuda:{arg.gpu}'
 
 if arg.id is not None:
     config['id'] = arg.id
 
-e = get_env(config)
-model = PlaNet(config, env=e)
-dataset = ExperienceReplay(config['experience size'], False, e.observation_size, e.action_size, config['bit depth'], config['device'])
-init_databuffer(dataset, e, config['seed episodes'])
+
+
+envs = ['cartpole-balance', 'cartpole-balance_sparse' ,  'cartpole-swingup', 'cartpole-swingup_sparse', 'reacher-easy', 'reacher-hard', 'walker-walk', 'walker-stand']
 
 wandb.init(
     project='Pine',
-    name=config['id'],
+    name='Pine_test1',
     config=config)
 
 
+pine = Pine(config)
 
-gym_teacher = Trainer(config, model, e, wandb_logger=wandb, buffer=dataset)
-gym_teacher.train(1000)
+trainer = PineTrainer(config, pine, wandb_logger=wandb)
 
+trainer.train(envs, 100)

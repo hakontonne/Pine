@@ -36,9 +36,11 @@ class ControlSuiteEnv():
   def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth):
     from dm_control import suite
     from dm_control.suite.wrappers import pixels
+    self.env_name = env
     domain, task = env.split('-')
     self.symbolic = symbolic
     self._env = suite.load(domain_name=domain, task_name=task, task_kwargs={'random': seed})
+
     if not symbolic:
       self._env = pixels.Wrapper(self._env)
     self.max_episode_length = max_episode_length

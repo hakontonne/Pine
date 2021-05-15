@@ -22,6 +22,7 @@ class Pine():
     self.config = config
     self.planet = PlaNet(config)
     self.agents = []
+    self.dev_agents = {}
 
     self.env = None
 
@@ -29,10 +30,24 @@ class Pine():
   def forward(self, observations, actions, nonterminals):
     return self.planet.forward(observations, actions, nonterminals)
 
+  def new_agent(self, env):
+
+    if self.planet.assembled:
+      self.dev_agents[self.env.env_name] = self.planet.save_task_networks()
+
+    self.env = env
+
+    self.planet.init_task_networks(self.config, env, statedicts=self.dev_agents[env.env_name] if env.env_name in self.dev_agents else None)
+    self.planet.set_optim(self.config)
+    self.planet.assembled = True
+    self.planet.env = env
+
   def new_env(self, env, task_description):
+    # Present a new env for the network and decide if this is a known one or not
     self.env = env
 
     if len(self.agents) == 0:
+      # we have no agents, the pine model is completly fresh
       self.planet.init_task_networks(self.config, env)
       self.planet.set_optim(self.config)
 
@@ -225,6 +240,9 @@ class PlaNet():
     self.transition_model.load_state_dict(d[1])
     self.observation_model.load_state_dict(d[2])
     self.encoder.load_state_dict(d[3])
+
+  def save_task_networks(self):
+    return self.transition_model.state_dict(), self.reward_model.state_dict()
 
 class TransitionModel(nn.Module):
   __constants__ = ['min_std_dev']

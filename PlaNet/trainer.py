@@ -14,10 +14,10 @@ from env import CONTROL_SUITE_ENVS, Env, GYM_ENVS, EnvBatcher
 from memory import ExperienceReplay
 from models import bottle, Encoder, ObservationModel, RewardModel, TransitionModel
 from planner import MPCPlanner
-from utils import lineplot, write_video
+from utils import lineplot, write_video, init_databuffer
 
-def get_env(config):
-    return Env(config['env name'], config['symbolic env'], config['seed'], config['max episode length'], config['action repeat'], config['bit depth'])
+def get_env(config, env_name=None):
+    return Env(config['env name'] if env_name is None else env_name, config['symbolic env'], config['seed'], config['max episode length'], config['action repeat'], config['bit depth'])
 
 class Trainer():
 
@@ -30,7 +30,7 @@ class Trainer():
         self.logger = wandb_logger
         self.optimiser = model.optimiser
 
-        self.env_name = config['env name']
+        self.env_name = env.env_name
         self.collection_interval = config['collect interval']
         self.grad_clip_norm = config['grad clip norm']
         self.batch_size = config['batch size']
@@ -169,6 +169,46 @@ class Trainer():
         test_envs.close()
 
         return total_rewards
+
+
+
+class PineTrainer():
+
+    def __init__(self, config, model, wandb_logger=None):
+
+        self.model = model
+        self.env_list = config['env list']
+
+        self.logger = wandb_logger
+        self.collection_interval = config['collect interval']
+        self.grad_clip_norm = config['grad clip norm']
+        self.batch_size = config['batch size']
+        self.chunk_size = config['chunk size']
+        self.max_episode_length = config['max episode length']
+        self.action_repeat = config['action repeat']
+        self.test_episodes = config['test episodes']
+        self.test_interval = config['test interval']
+        self.checkpoint_interval = config['checkpoint interval']
+        self.seed = config['seed']
+        self.id = config['id']
+        self.config = config
+
+
+    def train(self, n_iters):
+
+        for env in tqdm(env_list, desc='Training on envs'):
+            env = get_env(self.config, env_name=env)
+            self.buffer = ExperienceReplay(self.config['experience size'], False, env.observation_size, env.action_size,
+                                       self.config['bit depth'], self.config['device'])
+
+            init_databuffer(self.buffer, env, self.config['seed episodes'])
+
+            self.model.new_agent(env)
+
+            trainer = Trainer(self.config, self.model.planet, env, self.logger, self.buffer)
+
+            trainer.train(n_iters)
+
 
 
 
