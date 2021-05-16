@@ -14,7 +14,7 @@ config = {
 'id':  'tests',
 'seed': 1,
 'disable cuda': False,
-'env name':  'walker-run',
+'env name':  'cheetah-run',
 'action repeat': 8,
 'symbolic env': False,
 'max episode length': 1000,

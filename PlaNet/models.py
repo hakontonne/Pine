@@ -19,11 +19,13 @@ def bottle(f, x_tuple):
 
 class Agent():
 
-  def __init__(self, idx, state_dicts, description, reward):
-    self.idx = idx
+  def __init__(self, state_dicts, description_embed, observation_embedded):
+
     self.state_dicts = state_dicts
-    self.descriptions = [description]
-    self.typical_reward
+    self.desc_embed = [description_embed]
+
+    self.obs_embed = observation_embedded
+
 
 
 
@@ -39,7 +41,8 @@ class Pine():
     self.tokenizer = BertTokenizer.from_pretrained('bert-large-cased')
     self.bert = BertModel.from_pretrained('bert-large-cased').eval().to(self.device)
     self.env = None
-    self.agent_embeddings = torch.zeros((1,1024))
+
+
 
 
   def forward(self, observations, actions, nonterminals):
@@ -60,7 +63,7 @@ class Pine():
     self.treshold = 0.9
     self.n_duplicates = 1
 
-  def new_env(self, env, task_description):
+  def find_agent(self, env, task_description):
     # Present a new env for the network and decide if this is a known one or not
     self.env = env
 
@@ -69,33 +72,36 @@ class Pine():
       self.planet.init_task_networks(self.config, env)
       self.planet.set_optim(self.config)
 
-      return self.planet
+      return 0, 0
 
 
 
     observation = self.env.reset()
-    observation_similarity, encoded = self.compare_initial_observation(observation)
-    description_similarity,  = self.compare_task_description(task_description)
+    with torch.no_grad():
+      obs_embed = self.planet.encoder(observation)
+      desc_embeed = self.tokenizer(task_description, padding=True, return_tensors='pt')
+      desc_embeed = self.bert(**desc_embeed)[0]
 
-    agent, solved = self.eval_task(observation_similarity, description_similarity)
-    self.load_agent(agent)
+    obs_sim, desc_sim = self.compare_agents(obs_embed, desc_embeed[:,0,:])
 
-    if solved and self.test:
-      reward = self.test_run(self.test_episodes)
+    agent, confidence = self.task_confidence(obs_sim, desc_sim)
 
-      if reward >= agent.typical_reward*0.85:
-        agent.append_task(env, task_description)
-
+    return agent, confidence
 
 
-  def eval_task(self, obs_compare, descript_compare):
-    pass
+  def task_confidence(self, obs_similarites, desc_similarities):
+      val, idx = torch.max(torch.stack(obs_similarites)*torch.stack(desc_similarities), dim=0)
 
-  def compare_initial_observation(self, observation):
+      return self.agents[idx], val
 
-    encoded = self.planet.encoder(observation.to(self.device)).unsqueeze(0)
 
-    return F.cosine_similarity(encoded, self.agent_embeddings[1]), encoded
+
+  def compare_agents(self, obs_embed, description_embed, comparison=F.cosine_similarity):
+
+
+    return zip(*[(comparison(obs_embed, agent.obs_embed, dim=-1).max(), comparison(description_embed, agent.desc_embed[0], dim=-1).max()) for agent in self.agents])
+
+
 
 
 
@@ -109,6 +115,11 @@ class Pine():
     cos_sim = F.cosine_similarity(this_embed, self.agent_embeddings[0], dim=2)
 
     return cos_sim, this_embed
+
+
+  def append_agent_embeds(self, embed_tensor):
+    self.agent_embeddings[:, ]
+
 
 
   def test_run(self, test_episodes):
@@ -164,6 +175,12 @@ class Pine():
   def load_dict(self, planet_dict):
     self.planet.load_dict(planet_dict)
 
+  def manual_agent_add(self, statedicts, descriptors, initial_observation):
+    with torch.no_grad():
+      tokens = self.tokenizer(descriptors, padding=True, return_tensors='pt')
+      outputs = self.bert(**tokens)
+
+    self.agents.append(Agent(statedicts, outputs[0][:,0,:], self.planet.encoder(initial_observation.to(self.device))))
 
 
 
