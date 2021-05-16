@@ -95,8 +95,8 @@ class Trainer():
 
             if i % self.test_interval == 0:
                 self.planet_model.eval()
-                env_args = (self.env_name, False, self.seed, self.env.max_episode_length, self.env.action_repeat, self.env.bit_depth)
-                test_envs = EnvBatcher(Env, env_args, {}, self.test_episodes)
+
+                test_envs = EnvBatcher(env=(self.env, self.test_episodes))
 
 
                 with torch.no_grad():

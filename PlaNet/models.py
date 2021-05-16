@@ -5,8 +5,9 @@ from torch.nn import functional as F
 from planner import MPCPlanner
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
-
-
+from transformers import BertModel, BertTokenizer
+from env import EnvBatcher
+import numpy as np
 # Wraps the input tuple for a function to process a time x batch x features sequence in batch x features (assumes one output)
 def bottle(f, x_tuple):
   x_sizes = tuple(map(lambda x: x.size(), x_tuple))
@@ -16,21 +17,35 @@ def bottle(f, x_tuple):
 
 
 
+class Agent():
+
+  def __init__(self, idx, state_dicts, description, reward):
+    self.idx = idx
+    self.state_dicts = state_dicts
+    self.descriptions = [description]
+    self.typical_reward
+
+
+
 class Pine():
 
   def __init__(self, config):
     self.config = config
     self.planet = PlaNet(config)
+    self.device = config['device']
     self.agents = []
     self.dev_agents = {}
 
+    self.tokenizer = BertTokenizer.from_pretrained('bert-large-cased')
+    self.bert = BertModel.from_pretrained('bert-large-cased').eval().to(self.device)
     self.env = None
+    self.agent_embeddings = torch.zeros((1,1024))
 
 
   def forward(self, observations, actions, nonterminals):
     return self.planet.forward(observations, actions, nonterminals)
 
-  def new_agent(self, env):
+  def set_networks(self, env):
 
     if self.planet.assembled:
       self.dev_agents[self.env.env_name] = self.planet.save_task_networks()
@@ -40,7 +55,10 @@ class Pine():
     self.planet.init_task_networks(self.config, env, statedicts=self.dev_agents[env.env_name] if env.env_name in self.dev_agents else None)
     self.planet.set_optim(self.config)
     self.planet.assembled = True
+    self.test = True
     self.planet.env = env
+    self.treshold = 0.9
+    self.n_duplicates = 1
 
   def new_env(self, env, task_description):
     # Present a new env for the network and decide if this is a known one or not
@@ -54,22 +72,74 @@ class Pine():
       return self.planet
 
 
+
     observation = self.env.reset()
-    retval = self.compare_initial_observation(observation)
-    retval2 = self.compare_task_description(task_description)
+    observation_similarity, encoded = self.compare_initial_observation(observation)
+    description_similarity,  = self.compare_task_description(task_description)
 
-    return self.eval_likeness(retval, retval2)
+    agent, solved = self.eval_task(observation_similarity, description_similarity)
+    self.load_agent(agent)
 
-  def eval_likeness(self, obs_compare, descript_compare):
+    if solved and self.test:
+      reward = self.test_run(self.test_episodes)
+
+      if reward >= agent.typical_reward*0.85:
+        agent.append_task(env, task_description)
+
+
+
+  def eval_task(self, obs_compare, descript_compare):
     pass
 
   def compare_initial_observation(self, observation):
-    pass
 
+    encoded = self.planet.encoder(observation.to(self.device)).unsqueeze(0)
+
+    return F.cosine_similarity(encoded, self.agent_embeddings[1]), encoded
+
+
+
+  @torch.no_grad()
   def compare_task_description(self, description):
-    pass
+    tokens = self.tokenizer(description, padding=True, return_tensors='pt')
+    tokens = tokens.to(self.device)
+
+    this_embed = self.bert(**tokens)[0]
+    this_embed = this_embed[:,0,:].unsqueeze(0)
+    cos_sim = F.cosine_similarity(this_embed, self.agent_embeddings[0], dim=2)
+
+    return cos_sim, this_embed
 
 
+  def test_run(self, test_episodes):
+
+    self.eval()
+
+    batch_envs = EnvBatcher(env=(self.env, test_episodes))
+
+    with torch.no_grad():
+      observation, total_rewards = batch_envs.reset(), np.zeros((test_episodes,))
+      belief, posterior_state, action = torch.zeros(test_episodes, self.planet_model.belief_size,
+                                                    device=self.self.device),\
+                                        torch.zeros(test_episodes, self.planet_model.state_size,
+                                                    device=self.self.device), \
+                                        torch.zeros(test_episodes, self.env.action_size,
+                                                    device=self.device)
+
+      for t in range(self.max_episode_length // self.action_repeat):
+        belief, posterior_state, action = self.planet_model.get_action(belief, posterior_state, action,
+                                                                       observation.to(device=self.device),
+                                                                       action_max=self.env.action_range[1],
+                                                                       action_min=self.env.action_range[0])
+        next_obs, reward, done = batch_envs.step(action.cpu())
+
+        total_rewards += reward.numpy().sum()
+
+        observation = next_obs
+        if done.sum().item() == test_episodes:
+          break
+
+    return total_rewards
 
   def get_action(self, belief, posterior_state, action, observation, explore=False, action_max=None, action_min=None):
 

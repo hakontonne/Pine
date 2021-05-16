@@ -37,6 +37,7 @@ class ControlSuiteEnv():
     from dm_control import suite
     from dm_control.suite.wrappers import pixels
     self.env_name = env
+    self.seed = seed
     domain, task = env.split('-')
     self.symbolic = symbolic
     self._env = suite.load(domain_name=domain, task_name=task, task_kwargs={'random': seed})
@@ -48,6 +49,9 @@ class ControlSuiteEnv():
     #if action_repeat != CONTROL_SUITE_ACTION_REPEATS[domain]:
      # print('Using action repeat %d; recommended action repeat for domain is %d' % (action_repeat, CONTROL_SUITE_ACTION_REPEATS[domain]))
     self.bit_depth = bit_depth
+
+  def get_args(self):
+    return self.env_name, self.symbolic, self.seed, self.max_episode_length, self.action_repeat, self.action_repeat
 
   def reset(self):
     self.t = 0  # Reset internal timer
@@ -168,7 +172,15 @@ def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth):
 
 # Wrapper for batching environments together
 class EnvBatcher():
-  def __init__(self, env_class, env_args, env_kwargs, n):
+  def __init__(self, env_args=None, env=None):
+    if env_args is not None:
+      env_class, env_args, env_kwargs, n, e = env_args
+    elif env is not None:
+      env, n = env
+      env_args = env.get_args()
+      env_kwargs = {}
+      env_class = Env
+  
     self.n = n
     self.envs = [env_class(*env_args, **env_kwargs) for _ in range(n)]
     self.dones = [True] * n
