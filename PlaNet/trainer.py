@@ -174,40 +174,140 @@ class Trainer():
 
 class PineTrainer():
 
-    def __init__(self, config, model, wandb_logger=None):
+    def __init__(self, config, model):
 
         self.model = model
-        self.env_list = config['env list']
 
-        self.logger = wandb_logger
+
+
         self.collection_interval = config['collect interval']
         self.grad_clip_norm = config['grad clip norm']
         self.batch_size = config['batch size']
         self.chunk_size = config['chunk size']
         self.max_episode_length = config['max episode length']
-        self.action_repeat = config['action repeat']
+
         self.test_episodes = config['test episodes']
         self.test_interval = config['test interval']
         self.checkpoint_interval = config['checkpoint interval']
         self.seed = config['seed']
         self.id = config['id']
         self.config = config
+        self.device = config['device']
 
 
-    def train(self, n_iters):
+    def train_new_agent(self, env, dataset, iters, logger):
 
-        for env in tqdm(env_list, desc='Training on envs'):
+        action_repeat = env.action_repeat
+        for i in tqdm(range(iters), desc='Running training'):
+            acc_obs_loss = 0
+            acc_reward_loss = 0
+            acc_kl_loss    = 0
+            for j in range(self.collection_interval):
+                observations, actions, rewards, nonterminals = dataset.sample(self.batch_size, self.chunk_size)
+
+                pred_observation, pred_reward, kl_loss = self.model.planet.forward(observations, actions, nonterminals)
+
+                observation_loss = F.mse_loss(pred_observation, observations[1:], reduction='none').sum(dim=(2, 3, 4)).mean(dim=(0, 1))
+                reward_loss = F.mse_loss(pred_reward, rewards[:-1], reduction='none').mean(dim=(0, 1))
+
+
+                self.model.planet.optimiser.zero_grad()
+                (observation_loss + reward_loss + kl_loss).backward()
+                nn.utils.clip_grad_norm_(self.model.planet.param_list, self.grad_clip_norm, norm_type=2)
+                self.model.planet.optimiser.step()
+
+                acc_kl_loss += kl_loss.item()
+                acc_obs_loss += observation_loss.item()
+                acc_reward_loss += reward_loss.item()
+
+
+            logger.log({'train_obs_loss' : acc_obs_loss, 'train_reward_loss': acc_reward_loss}, step=i)
+
+            with torch.no_grad():
+                observation, total_reward = env.reset(), 0
+                belief, posterior_state, action = torch.zeros(1, self.model.planet.belief_size, device=self.model.device),\
+                                                  torch.zeros(1, self.model.planet.state_size,  device=self.model.device),\
+                                                  torch.zeros(1, env.action_size, device=self.model.device)
+
+                for _ in range(self.max_episode_length//env.action_repeat):
+
+                    belief, posterior_state, action = self.model.planet.get_action(belief, posterior_state, action, observation.to(device=self.model.device), explore=True)
+
+                    next_obs, reward, done = env.step(action[0].cpu())
+                    dataset.append(observation, action.cpu(), reward, done)
+                    total_reward += reward
+                    observation = next_obs
+
+                logger.log({'train_reward': total_reward}, step=i)
+
+
+    def train_only_pine(self, init_agents, new_envs):
+        pass
+
+    def test_pine(self, init_agents, new_envs):
+        results = {}
+        for agent in init_agents:
+            this_result = {}
+            for env_name, task_desc in new_envs:
+                e = get_env(self.config, env_name=env_name)
+                obs = e.reset().to(self.device)
+                visual, text = self.model.raw_to_embeds(obs, task_desc)
+                visual_sim = F.cosine_similarity(visual, agent.obs_embed, dim=-1)
+                text_sim = F.cosine_similarity(text[:,0,:], agent.desc_embed, dim=-1)
+                this_result[env_name] = {'visual similarity' : visual_sim, 'text similarity' : text_sim}
+
+
+            all_textsims = torch.stack([this_result[k]['text similarity'] for k in this_result])
+            text_norm = all_textsims - all_textsims.min()
+            text_norm /= text_norm.max()
+            for i, k in enumerate(this_result):
+                this_result[k]['text similarity normalized'] = text_norm[i]
+
+            results[agent.task_name] = this_result if agent.task_name not in results else results[
+                                                                                              agent.task_name] + this_result
+
+        return results
+
+
+
+    def train(self, env_list, n_iters):
+
+
+
+        for env, task_descriptor in tqdm(env_list, desc='Training on envs'):
+
+            logger = wandb.init(
+                project='Pine',
+                name=f'Pine_run_{env}',
+                reinit=True
+            )
+
+
             env = get_env(self.config, env_name=env)
             self.buffer = ExperienceReplay(self.config['experience size'], False, env.observation_size, env.action_size,
                                        self.config['bit depth'], self.config['device'])
 
             init_databuffer(self.buffer, env, self.config['seed episodes'])
 
-            self.model.new_agent(env)
 
-            trainer = Trainer(self.config, self.model.planet, env, self.logger, self.buffer)
+            solved, confidence = self.model.new_task(env, task_descriptor)
+            logger.log({'solved': solved, 'confidence': confidence})
+            if solved:
+               reward = self.model.test_run(5) / 5
+               wandb.log({'initial_test_reward' : reward})
 
-            trainer.train(n_iters)
+
+            else:
+                reward = self.model.test_run(5) / 5
+                logger.log({'pre_train_test_reward' : reward})
+                self.train_new_agent(env, self.buffer, n_iters, logger)
+                reward = self.model.test_run(5) / 5
+                logger.log({'after_train_test_reward' : reward})
+                self.model.update_agent()
+
+            logger.finish()
+            torch.save(self.model.model_save(), f'checkpoints/pine_{len(self.model.agents)}_agents.pth')
+
 
 
 

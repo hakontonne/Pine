@@ -10,12 +10,6 @@ from utils import init_databuffer
 import env
 
 
-parser = argparse.ArgumentParser(description='Optional description of cuda device')
-parser.add_argument('--gpu',type=int, choices=range(torch.cuda.device_count()))
-parser.add_argument('--id', type=str)
-
-arg = parser.parse_args()
-
 config = {
 
 'id':  'pine_test',
@@ -58,15 +52,13 @@ config = {
 'checkpoint experience': False,
 
 'render': False,
-'device': 'cuda:0',
+'device': 'cuda:3',
 
 }
+pine_dict = torch.load('manual_models/walker.pth', map_location=torch.device(config['device']))
+obs, enc = pine_dict['planet_model'][2], pine_dict['planet_model'][3]
 
-if arg.gpu is not None:
-    config['device'] = f'cuda:{arg.gpu}'
-
-if arg.id is not None:
-    config['id'] = arg.id
+Pine_dict = {'networks' : [enc, obs], 'agents' : []}
 
 initial_envs = [
     ('cartpole-balance', 'Balance an unactuated pole by applying forces to a cart at its base, starting with the pole upwards and with non-sparse rewards', 'manual_models/cartpole_balance.pth'),
@@ -85,15 +77,7 @@ test_envs = [
 ]
 
 
-pine_dict = torch.load('manual_models/walker.pth', map_location=torch.device(config['device']))
-obs, enc = pine_dict['planet_model'][2], pine_dict['planet_model'][3]
-
-Pine_dict = {'networks' : [enc, obs], 'agents' : []}
-
-
 pine = Pine(config, saved_dict=Pine_dict)
-
-
 for env_name, desc, path in initial_envs:
     config['action repeat'] = env.CONTROL_SUITE_ACTION_REPEATS['env_name'] if env_name in env.CONTROL_SUITE_ACTION_REPEATS else 4
     environment = get_env(config, env_name)
@@ -103,11 +87,7 @@ for env_name, desc, path in initial_envs:
 
     pine.manual_agent_add(dicts, desc, environment.reset(), action_size=environment.action_size, name=env_name)
 
-
+test_envs += [(i[0], i[1]) for i in initial_envs]
 
 trainer = PineTrainer(config, pine)
-
-trainer.train(test_envs, 200)
-
-
-
+result = trainer.test_pine(pine.agents, test_envs)

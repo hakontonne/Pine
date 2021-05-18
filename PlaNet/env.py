@@ -8,7 +8,7 @@ CONTROL_SUITE_ENVS = ['cartpole-balance', 'cartpole-balance_sparse' ,  'cartpole
                       'reacher-easy', 'reacher-hard', 'finger-spin', 'finger-turn_easy', 'finger-turn_hard', 'cheetah-run',
                       'ball_in_cup-catch', 'walker-walk', 'walker-stand', 'walker-run', 'hopper-hop', 'hopper-stand',
                       'fish-swim', 'fish-upright', 'swimmer-swimmer6', 'swimmer-swimmer15', 'humanoid-run', 'manipulator-bring_ball',
-                      'acrobot-swingup']
+                      'acrobot-swingup', 'pendulum-swingup']
 CONTROL_SUITE_ACTION_REPEATS = {'cartpole': 8, 'reacher': 4, 'finger': 2, 'cheetah': 4, 'ball_in_cup': 6, 'walker': 2, 'fish' : 4, 'hopper' : 2}
 
 
@@ -180,7 +180,6 @@ class EnvBatcher():
       env_args = env.get_args()
       env_kwargs = {}
       env_class = Env
-  
     self.n = n
     self.envs = [env_class(*env_args, **env_kwargs) for _ in range(n)]
     self.dones = [True] * n

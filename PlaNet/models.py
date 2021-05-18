@@ -19,75 +19,125 @@ def bottle(f, x_tuple):
 
 class Agent():
 
-  def __init__(self, state_dicts, description_embed, observation_embedded):
+  def __init__(self, state_dicts, description_embed, observation_embedded, task_name='', action_size=0):
 
     self.state_dicts = state_dicts
-    self.desc_embed = [description_embed]
+    self.desc_embed = description_embed
 
     self.obs_embed = observation_embedded
+    self.task_name = task_name
+
+    self.action_size = action_size
+
+
+  def add_embeddings(self, visual, text):
+
+    self.desc_embed = torch.cat((self.desc_embed, text), dim=0)
+    self.obs_embed  = torch.cat((self.obs_embed, visual), dim=0)
+
+
 
 
 
 
 class Pine():
 
-  def __init__(self, config):
+  def __init__(self, config, saved_dict=None):
     self.config = config
-    self.planet = PlaNet(config)
+    if saved_dict is not None:
+      self.planet = PlaNet(config, visual_networks=saved_dict['networks'])
+      self.agents = saved_dict['agents']
+    else:
+      self.planet = PlaNet(config)
+      self.agents = []
+
+    self.encoder = self.planet.encoder
+    self.active_agent = None
     self.device = config['device']
-    self.agents = []
     self.dev_agents = {}
 
+    self.max_episode_length = config['max episode length']
     self.tokenizer = BertTokenizer.from_pretrained('bert-large-cased')
     self.bert = BertModel.from_pretrained('bert-large-cased').eval().to(self.device)
     self.env = None
-
-
-
+    self.select_threshold = 0.85
 
   def forward(self, observations, actions, nonterminals):
     return self.planet.forward(observations, actions, nonterminals)
 
-  def set_networks(self, env):
-
-    if self.planet.assembled:
-      self.dev_agents[self.env.env_name] = self.planet.save_task_networks()
+  def new_task(self, env, task_description):
 
     self.env = env
-
-    self.planet.init_task_networks(self.config, env, statedicts=self.dev_agents[env.env_name] if env.env_name in self.dev_agents else None)
-    self.planet.set_optim(self.config)
-    self.planet.assembled = True
-    self.test = True
     self.planet.env = env
-    self.treshold = 0.9
-    self.n_duplicates = 1
+
+    agent, confidence, o_embed, d_embed = self.find_agent(env, task_description)
+
+    if agent is None:
+      self.planet.new_task_network(self.config, env)
+      return False, confidence
+
+    self.solved = True if confidence >= self.select_threshold else False
+
+    self.load_agent(agent, env, (o_embed, d_embed), copy=not self.solved)
+
+
+    return self.solved, confidence
 
   def find_agent(self, env, task_description):
     # Present a new env for the network and decide if this is a known one or not
     self.env = env
 
     if len(self.agents) == 0:
-      # we have no agents, the pine model is completly fresh
-      self.planet.init_task_networks(self.config, env)
-      self.planet.set_optim(self.config)
-
-      return 0, 0
+      return None, 1
 
 
+    observation = self.env.reset().to(self.device)
 
-    observation = self.env.reset()
-    with torch.no_grad():
-      obs_embed = self.planet.encoder(observation)
-      desc_embeed = self.tokenizer(task_description, padding=True, return_tensors='pt')
-      desc_embeed = self.bert(**desc_embeed)[0]
+    obs_embed, desc_embed = self.raw_to_embeds(observation, task_description)
 
-    obs_sim, desc_sim = self.compare_agents(obs_embed, desc_embeed[:,0,:])
+    obs_sim, desc_sim = self.compare_agents(obs_embed, desc_embed[:,0,:])
+
 
     agent, confidence = self.task_confidence(obs_sim, desc_sim)
 
-    return agent, confidence
+    print(f'Selected agent {agent.task_name} with similarities {obs_sim}, {desc_sim}, giving a confidence of {confidence}')
 
+    return agent, confidence, obs_embed, desc_embed
+
+
+  def raw_to_embeds(self, visual, text, text_method='CLS'):
+    with torch.no_grad():
+      obs_embed = self.encoder(visual)
+      desc_embeed = self.tokenizer(text, padding=True, return_tensors='pt').to(self.device)
+      desc_embeed = self.bert(**desc_embeed)[0]
+
+    return obs_embed, desc_embeed
+
+
+  def load_agent(self, agent, new_env, embeddings, copy=False):
+    if copy:
+      agent = Agent(agent.state_dicts, embeddings[0], embeddings[1], action_size=agent.action_size, task_name=f'{agent.task_name}-derived {new_env.env_name}')
+      self.agents.append(agent)
+
+    else:
+      agent.add_embeddings(embeddings[0], embeddings[1])
+
+    self._load_task_models_dict(agent.state_dicts, agent.action_size)
+    self.planet.set_optim(self.config)
+
+
+    if agent.action_size != new_env.action_size:
+      print("Warning, misaligned action sizes, most likely a mislabeled env!")
+      self.planet.transition_model.change_action_size(new_action_size=new_env.action_size, device=self.device)
+      agent.action_size = new_env.action_size
+
+    self.planet.create_planner(new_env)
+
+    self.planet.assembled = True
+    self.active_agent = agent
+
+  def update_agent(self):
+    self.active_agent.state_dicts = (self.planet.transition_model.state_dict(), self.planet.reward_model.state_dict())
 
   def task_confidence(self, obs_similarites, desc_similarities):
       val, idx = torch.max(torch.stack(obs_similarites)*torch.stack(desc_similarities), dim=0)
@@ -95,13 +145,10 @@ class Pine():
       return self.agents[idx], val
 
 
-
   def compare_agents(self, obs_embed, description_embed, comparison=F.cosine_similarity):
 
 
-    return zip(*[(comparison(obs_embed, agent.obs_embed, dim=-1).max(), comparison(description_embed, agent.desc_embed[0], dim=-1).max()) for agent in self.agents])
-
-
+    return zip(*[(comparison(obs_embed, agent.obs_embed, dim=-1).max(), comparison(description_embed, agent.desc_embed, dim=-1).max()) for agent in self.agents])
 
 
 
@@ -117,10 +164,6 @@ class Pine():
     return cos_sim, this_embed
 
 
-  def append_agent_embeds(self, embed_tensor):
-    self.agent_embeddings[:, ]
-
-
 
   def test_run(self, test_episodes):
 
@@ -130,15 +173,15 @@ class Pine():
 
     with torch.no_grad():
       observation, total_rewards = batch_envs.reset(), np.zeros((test_episodes,))
-      belief, posterior_state, action = torch.zeros(test_episodes, self.planet_model.belief_size,
-                                                    device=self.self.device),\
-                                        torch.zeros(test_episodes, self.planet_model.state_size,
-                                                    device=self.self.device), \
+      belief, posterior_state, action = torch.zeros(test_episodes, self.planet.belief_size,
+                                                    device=self.device),\
+                                        torch.zeros(test_episodes, self.planet.state_size,
+                                                    device=self.device), \
                                         torch.zeros(test_episodes, self.env.action_size,
                                                     device=self.device)
 
-      for t in range(self.max_episode_length // self.action_repeat):
-        belief, posterior_state, action = self.planet_model.get_action(belief, posterior_state, action,
+      for t in range(self.max_episode_length // self.env.action_repeat):
+        belief, posterior_state, action = self.planet.get_action(belief, posterior_state, action,
                                                                        observation.to(device=self.device),
                                                                        action_max=self.env.action_range[1],
                                                                        action_min=self.env.action_range[0])
@@ -162,11 +205,23 @@ class Pine():
   def train(self):
     self.planet.train()
 
+
+  def model_save(self):
+    d = {
+      'agents' : self.agents,
+      'networks' : [self.planet.encoder.state_dict(), self.planet.observation_model.state_dict()]
+    }
+  def model_load(self, model_dict):
+    self.agents = model_dict['agents']
+    self.encoder.load_state_dict(model_dict['networks'][0])
+    self.planet.observation_model.load_state_dict(model_dict['networks'][1])
+
+
   def task_models_dict(self):
     return self.planet.transition_model.state_dict(), self.planet.reward_model.state_dict()
 
-  def load_task_models_dict(self, dicts):
-    self.planet.init_task_networks(self.config, self.env, dicts)
+  def _load_task_models_dict(self, dicts, action_space):
+    self.planet.init_task_networks(action_space, statedicts=dicts)
 
 
   def state_dict(self):
@@ -175,19 +230,19 @@ class Pine():
   def load_dict(self, planet_dict):
     self.planet.load_dict(planet_dict)
 
-  def manual_agent_add(self, statedicts, descriptors, initial_observation):
+  def manual_agent_add(self, statedicts, descriptors, initial_observation, action_size=0, name=''):
     with torch.no_grad():
-      tokens = self.tokenizer(descriptors, padding=True, return_tensors='pt')
+      tokens = self.tokenizer(descriptors, padding=True, return_tensors='pt').to(self.device)
       outputs = self.bert(**tokens)
 
-    self.agents.append(Agent(statedicts, outputs[0][:,0,:], self.planet.encoder(initial_observation.to(self.device))))
+    self.agents.append(Agent(statedicts, outputs[0][:,0,:], self.planet.encoder(initial_observation.to(self.device)), action_size=action_size, task_name=name))
 
 
 
 class PlaNet():
 
 
-  def __init__(self, config, env=None):
+  def __init__(self, config, env=None, visual_networks=None):
     super(PlaNet, self).__init__()
     self.assembled = False
     self.config = config
@@ -207,8 +262,12 @@ class PlaNet():
 
     self.free_nats = torch.full((1, ), config['free nats'], dtype=torch.float32, device=self.device)
 
+
     if env is None and not config['symbolic env']:
       self.init_visual_networks( (3, 64, 64))
+      if visual_networks is not None:
+        self.encoder.load_state_dict(visual_networks[0])
+        self.observation_model.load_state_dict(visual_networks[1])
 
     else:
       self.init_visual_networks(env.observation_size)
@@ -225,10 +284,10 @@ class PlaNet():
                                               self.embedding_size).to(device=self.device)
 
 
-  def init_task_networks(self, config, env, statedicts=None):
+  def init_task_networks(self, action_size, statedicts=None):
 
 
-    self.transition_model = TransitionModel(self.belief_size, self.state_size, env.action_size, self.hidden_size,
+    self.transition_model = TransitionModel(self.belief_size, self.state_size, action_size, self.hidden_size,
                                        self.embedding_size, ).to(device=self.device)
 
     self.reward_model = RewardModel(self.belief_size, self.state_size, self.hidden_size).to(
@@ -240,6 +299,7 @@ class PlaNet():
 
 
 
+  def create_planner(self, env):
     self.planner = MPCPlanner(env.action_size, self.planning_horizon, self.optimisation_iters, self.candidates,
                          self.top_candidates, self.transition_model, self.reward_model, env.action_range[0], env.action_range[1])
 
@@ -256,6 +316,7 @@ class PlaNet():
 
   def new_task_network(self, config, env):
     self.init_task_networks(config, env)
+    self.create_planner(env)
     self.set_optim(config)
     self.assembled = True
 
@@ -337,6 +398,8 @@ class TransitionModel(nn.Module):
   def __init__(self, belief_size, state_size, action_size, hidden_size, embedding_size, activation_function='relu', min_std_dev=0.1):
     super().__init__()
 
+    self.state_size = state_size
+    self.belief_size = belief_size
     self.min_std_dev = min_std_dev
     self.fc_embed_state_action = nn.Linear(state_size + action_size, belief_size)
     self.rnn = nn.GRUCell(belief_size, belief_size)
@@ -385,6 +448,9 @@ class TransitionModel(nn.Module):
     if observations is not None:
       hidden += [torch.stack(posterior_states[1:], dim=0), torch.stack(posterior_means[1:], dim=0), torch.stack(posterior_std_devs[1:], dim=0)]
     return hidden
+
+  def change_action_size(self, new_action_size, device):
+    self.fc_embed_state_action = nn.Linear(self.state_size + new_action_size, self.belief_size).to(device)
 
 
 class SymbolicObservationModel(jit.ScriptModule):
