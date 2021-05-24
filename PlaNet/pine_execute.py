@@ -76,11 +76,12 @@ initial_envs = [
 ]
 
 test_envs = [
-    ('cheetah-run', 'A planar runner, based on a simplified cheetah, receive rewards for running quickly forwards'),
+
     ('cartpole-swingup', 'Starting with the pole downwards, swing the unactuated pole up and balance it by applying forces to the cart at the base, with non sparse-rewards'),
     ('walker-run', 'Make the planar walker, with two legs, run fast forward without falling to the ground, meaning the torso must be upright and at the correct height'),
     ('pendulum-swingup', 'Classic pendulum swingup task, swing the pendulum up and balance it, receive sparse rewards while the pendulum is within 30 degrees of the vertical'),
-    ('finger-spin', 'Use the finger to spin the a toy around a hinge, keep spinning to get more rewards')
+    ('finger-spin', 'Use the finger to spin the a toy around a hinge, keep spinning to get more rewards'),
+    ('acrobot-swingup', 'The underactuated double pendulum, torque applied to the second joint, where the goal is to swing up and balance')
 
 ]
 
