@@ -6,7 +6,7 @@ official_envs = {
     'cartpole-balance'       : ['Balance an unactuated pole by applying forces to a cart at its base, starting with the pole upwards and with non-sparse rewards'],
     'finger-spin'            : ['A 3DoF planar finger is required to rotate a toy body on an unactuated hinge, the body must be continually rotated or spun'],
     'walker-walk'            : ['A planar walker with two legs and a torso, recieve rewards for standing the torso upright and in a certain high, while also walking'],
-    'walker-stand'           : ['A planar walker with two legs and a torso, recieve rewards for standing the torso upright and in a certain high'],
+    #'walker-stand'           : ['A planar walker with two legs and a torso, recieve rewards for standing the torso upright and in a certain high'],
     'walker-run'             : ['A planar walker with two legs and a torso, recieve rewards for standing the torso upright and in a certain high, while also running fast'],
     'reacher-easy'           : ['A simple two link planar reacher, get rewards when the end effector is inside the large target area'],
     'cheetah-run'            : ['A planar runner biped, based on a simplified cheetah, receive rewards for running quickly forwards'],
@@ -17,7 +17,7 @@ official_envs = {
     'hopper-hop'             : ['A planar one-legged hopper, initialised with a random configuration, make the hopper hop forward while also stadning up'],
     'manipulator-insert_ball': ['A planar manipulator is rewarded for bringing a ball into a basket'],
     'manipulator-bring_peg'  : ['A planar manipulator is rewarded for bringing a peg into another peg'],
-    'manipulator-insert_peg' : ['A planar manipulator is rewarded for bringing a peg into a slot']
+    #'manipulator-insert_peg' : ['A planar manipulator is rewarded for bringing a peg into a slot']
 
 }
 
@@ -71,11 +71,9 @@ other_envs = {
                                  'Bring the ball using the gripper attached to the manipulator',
                                 'Find the ball and bring it to the target area using the manipulator'],
 
-    'manipulator-'
-
-
-
-
+    'manipulator-bring_peg'  : ['Using a manipulator with a gripper, find the peg and hold it in the target area',
+                                'Bring the peg with a manipulator with a gripper on the end',
+                                'Find the peg in the play area and bring it with the gripper on the manipulator end']
 
 }
 

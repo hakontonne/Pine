@@ -17,6 +17,37 @@ def bottle(f, x_tuple):
 
 
 
+class LikenessNetworkSingle(nn.Module):
+
+  def __init__(self):
+    super(LikenessNetworkMultiple, self).__init__()
+    self.layer = nn.Linear(2048, 1)
+
+  def forward(self, x):
+    x = self.layer(x)
+
+    return F.relu(x)
+
+
+class LikenessNetworkMultiple(nn.Module):
+
+  def __init__(self):
+    super(LikenessNetworkMultiple, self).__init__()
+    self.layers = [nn.Linear(2048, 4096), nn.Linear(4096, 1024), nn.Linear(1024, 1)]
+
+
+
+  def forward(self, x):
+    x = torch.stac
+    for layer in self.layers[:-1]:
+      x = F.relu(layer(x))
+
+
+    return F.sigmoid(self.layers[-1])
+
+
+
+
 class Agent():
 
   def __init__(self, state_dicts, description_embed, observation_embedded, task_name='', action_size=0):
