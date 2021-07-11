@@ -62,6 +62,7 @@ config = {
 
 }
 
+
 if arg.gpu is not None:
     config['device'] = f'cuda:{arg.gpu}'
 
@@ -109,6 +110,8 @@ for env_name, desc, path in initial_envs:
 trainer = PineTrainer(config, pine)
 
 trainer.train(test_envs, 200)
+
+
 
 
 

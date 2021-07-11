@@ -19,6 +19,44 @@ from utils import lineplot, write_video, init_databuffer
 def get_env(config, env_name=None):
     return Env(config['env name'] if env_name is None else env_name, config['symbolic env'], config['seed'], config['max episode length'], config['action repeat'], config['bit depth'])
 
+
+class BertTrainer():
+
+    def __init__(self, model):
+        self.model = model
+        self.loss_function = torch.nn.BCEWithLogitsLoss()
+        self.optim = optim.Adam(model.parameters(), lr=0.001, eps=0.0001)
+
+    def train(self, dataset, n_epochs):
+        losses = []
+        for i in tqdm(range(n_epochs)):
+            epoch_loss = 0
+            for x, y in tqdm(dataset, desc="In dataset"):
+
+                loss = self.forward_step(x.to('cuda:5'), y.to('cuda:5'))
+                self.optim.zero_grad()
+                loss.backward(retain_graph=True)
+                self.optim.step()
+
+                epoch_loss += loss.detach().cpu().numpy()
+
+            losses.append(epoch_loss)
+
+        return losses
+
+
+
+
+
+
+    def forward_step(self, x, y):
+        pred = self.model(x)
+        return self.loss_function(pred, y)
+
+
+
+
+
 class Trainer():
 
     def __init__(self, config, model, env, wandb_logger=None, buffer=None):
