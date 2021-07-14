@@ -1,7 +1,7 @@
 import torch.cuda
 
 from trainer import Trainer, get_env, PineTrainer
-from models import PlaNet, Pine
+from models import PlaNet, PineModel
 import wandb
 from memory import ExperienceReplay
 from tqdm import tqdm
@@ -93,7 +93,7 @@ obs, enc = pine_dict['planet_model'][2], pine_dict['planet_model'][3]
 Pine_dict = {'networks' : [enc, obs], 'agents' : []}
 
 
-pine = Pine(config, saved_dict=Pine_dict)
+pine = PineModel(config, saved_dict=Pine_dict)
 
 
 for env_name, desc, path in initial_envs:

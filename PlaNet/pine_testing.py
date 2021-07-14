@@ -1,7 +1,7 @@
 import torch.cuda
 
 from trainer import Trainer, get_env, PineTrainer
-from models import PlaNet, Pine
+from models import PlaNet, PineModel
 import wandb
 from memory import ExperienceReplay
 from tqdm import tqdm
@@ -77,7 +77,7 @@ test_envs = [
 ]
 
 
-pine = Pine(config, saved_dict=Pine_dict)
+pine = PineModel(config, saved_dict=Pine_dict)
 for env_name, desc, path in initial_envs:
     config['action repeat'] = env.CONTROL_SUITE_ACTION_REPEATS['env_name'] if env_name in env.CONTROL_SUITE_ACTION_REPEATS else 4
     environment = get_env(config, env_name)

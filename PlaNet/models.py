@@ -68,7 +68,7 @@ class Agent():
 
 
 
-class Pine():
+class PineModel():
 
   def __init__(self, config, saved_dict=None):
     self.config = config
@@ -97,8 +97,9 @@ class Pine():
 
     self.env = env
     self.planet.env = env
+    observation = self.env.reset().to(self.device)
 
-    agent, confidence, o_embed, d_embed = self.find_agent(env, task_description)
+    agent, confidence, o_embed, d_embed = self.find_agent(observation, task_description)
 
     if agent is None:
       self.planet.new_task_network(self.config, env)
@@ -108,18 +109,15 @@ class Pine():
 
     self.load_agent(agent, env, (o_embed, d_embed), copy=not self.solved)
 
-
     return self.solved, confidence
 
-  def find_agent(self, env, task_description):
+  def find_agent(self, observation, task_description):
     # Present a new env for the network and decide if this is a known one or not
-    self.env = env
+
 
     if len(self.agents) == 0:
       return None, 1
 
-
-    observation = self.env.reset().to(self.device)
 
     obs_embed, desc_embed = self.raw_to_embeds(observation, task_description)
 
